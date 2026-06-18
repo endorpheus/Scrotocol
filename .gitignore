@@ -4,3 +4,4 @@ build/
 .git/
 docs/
 compile_commands.json
+CLAUDE.md
