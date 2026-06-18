@@ -1,0 +1,6 @@
+build/
+.claude/
+.cache/
+.git/
+docs/
+compile_commands.json

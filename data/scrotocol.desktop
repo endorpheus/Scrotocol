@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Scrotocol
+Comment=Screenshot tool built on scrot
+Exec=scrotocol
+Icon=accessories-screenshot-tool
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=screenshot;capture;scrot;
