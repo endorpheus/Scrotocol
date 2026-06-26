@@ -12,6 +12,7 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
 pkg_check_modules(GIO_UNIX REQUIRED IMPORTED_TARGET gio-unix-2.0)
+pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
 
 add_executable(scrotocol
   src/main.cpp
@@ -23,7 +24,7 @@ add_executable(scrotocol
   src/MainWindow.cpp
 )
 
-target_link_libraries(scrotocol PRIVATE PkgConfig::GTK4 PkgConfig::GIO_UNIX)
+target_link_libraries(scrotocol PRIVATE PkgConfig::GTK4 PkgConfig::GIO_UNIX PkgConfig::X11)
 
 install(TARGETS scrotocol RUNTIME DESTINATION bin)
 install(FILES data/scrotocol.desktop DESTINATION share/applications)

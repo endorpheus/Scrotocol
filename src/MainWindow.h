@@ -50,6 +50,9 @@ private:
     void loadFromHistory(const std::string &path);
     void deleteHistoryEntry(const std::string &path);
 
+    void updateTaskbarIcon(GdkPixbuf *pixbuf);
+    void resetTaskbarIcon();
+
     static void onCaptureButtonClickedTrampoline(GtkButton *button, gpointer userData);
     static void onApplyCropClickedTrampoline(GtkButton *button, gpointer userData);
     static void onResetCropClickedTrampoline(GtkButton *button, gpointer userData);
@@ -64,4 +67,5 @@ private:
     static void onSaveDialogFinished(GObject *source, GAsyncResult *result, gpointer userData);
     static void onMinimizeBeforeCaptureToggledTrampoline(GObject *obj, GParamSpec *pspec,
                                                           gpointer userData);
+    static void onTaskbarIconToggledTrampoline(GObject *obj, GParamSpec *pspec, gpointer userData);
 };

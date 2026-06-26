@@ -8,6 +8,7 @@ constexpr const char *kGroup = "scrotocol";
 constexpr const char *kKeyHistoryDir = "history_dir";
 constexpr const char *kKeyDefaultDelay = "default_delay";
 constexpr const char *kKeyMinimizeBeforeCapture = "minimize_before_capture";
+constexpr const char *kKeyTaskbarIconUseCapture = "taskbar_icon_use_capture";
 } // namespace
 
 Config &Config::instance() {
@@ -59,6 +60,13 @@ void Config::load() {
         minimize_before_capture_ = minimize;
     else
         g_clear_error(&minimizeError);
+
+    GError *taskbarIconError = nullptr;
+    gboolean taskbarIcon = g_key_file_get_boolean(keyfile, kGroup, kKeyTaskbarIconUseCapture, &taskbarIconError);
+    if (!taskbarIconError)
+        taskbar_icon_use_capture_ = taskbarIcon;
+    else
+        g_clear_error(&taskbarIconError);
 }
 
 void Config::save() const {
@@ -66,6 +74,7 @@ void Config::save() const {
     g_key_file_set_string(keyfile, kGroup, kKeyHistoryDir, history_dir_.c_str());
     g_key_file_set_integer(keyfile, kGroup, kKeyDefaultDelay, default_delay_);
     g_key_file_set_boolean(keyfile, kGroup, kKeyMinimizeBeforeCapture, minimize_before_capture_);
+    g_key_file_set_boolean(keyfile, kGroup, kKeyTaskbarIconUseCapture, taskbar_icon_use_capture_);
 
     std::string path = configFilePath();
     g_autoptr(GError) error = nullptr;
@@ -85,5 +94,10 @@ void Config::setDefaultDelaySeconds(int seconds) {
 
 void Config::setMinimizeBeforeCapture(bool value) {
     minimize_before_capture_ = value;
+    save();
+}
+
+void Config::setTaskbarIconUseCapture(bool value) {
+    taskbar_icon_use_capture_ = value;
     save();
 }

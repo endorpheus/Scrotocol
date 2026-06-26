@@ -11,6 +11,9 @@ A native GTK4/C++ desktop front-end for [`scrot`](https://github.com/resurrectin
 - **Save As** — native `GtkFileDialog` save dialog, pre-filled with a timestamped filename and the history folder as the starting location.
 - **History panel** — every capture is auto-saved to a configurable folder (default `~/Pictures/Scrotocol`) and listed as thumbnails in a sidebar; click a thumbnail to reload it into the preview, or delete it.
 - **Tray icon** — a `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` implementation over raw GDBus (see [Tray icon details](#tray-icon-details) below). Left-click toggles the main window. Right-click opens a context menu: Full Screen, Region, Window, Timer (with current delay value), Settings/Show, and Quit. Closing the window (the titlebar X) quits normally — the tray is purely an opt-in "minimize to tray" affordance via the down-arrow header button.
+- **Settings** — in-app popover (gear icon in the header bar) with:
+  - *Minimize before capture* — hides the main window before each capture so it doesn't appear in Full Screen/Active Window shots.
+  - *Show last capture as taskbar icon* — updates the window's `_NET_WM_ICON` X11 property after each successful capture, so docks and taskbars that read that property display the captured image instead of the static app icon. X11-only; silently no-ops on Wayland (which the app doesn't fully support anyway, given the `scrot` dependency).
 
 ## Dependencies
 
@@ -19,6 +22,7 @@ A native GTK4/C++ desktop front-end for [`scrot`](https://github.com/resurrectin
 | `scrot` | The actual screenshot engine; must be on `PATH`. Developed against scrot 2.0.0. |
 | GTK4 | 4.10+ required for `GtkFileDialog` and `GtkUriLauncher`. |
 | `gio-unix-2.0` | For `GSubprocess` (launching `scrot`) and `GDBus` (the tray icon). |
+| `libX11` | For writing `_NET_WM_ICON` when the taskbar-icon setting is enabled. |
 | CMake 3.16+ | Build system. |
 | A C++20 compiler | GCC or Clang. |
 
@@ -57,10 +61,14 @@ Settings are stored in `$XDG_CONFIG_HOME/scrotocol/config.ini` (typically `~/.co
 [scrotocol]
 history_dir=/home/you/Pictures/Scrotocol
 default_delay=0
+minimize_before_capture=true
+taskbar_icon_use_capture=false
 ```
 
 - `history_dir` — where auto-saved captures and their thumbnails live. Change it by editing the file directly (no in-app picker yet) and restarting the app.
 - `default_delay` — remembers the last value set in the header bar's delay spinner.
+- `minimize_before_capture` — mirrors the in-app checkbox; hides the window before each capture.
+- `taskbar_icon_use_capture` — mirrors the in-app checkbox; writes the last capture to `_NET_WM_ICON` on the main window after each shot.
 
 ## Project layout
 
@@ -106,5 +114,7 @@ Note: **Plank does not work as a tray host.** It's a launcher/window dock with n
 ## Known limitations
 
 - `gdk_texture_new_for_pixbuf` is deprecated as of GTK 4.20 with no direct replacement yet; it's still fully functional in GTK 4.22 and is used throughout since the app's image pipeline is built around `GdkPixbuf`. Revisit if/when GTK ships a real replacement.
-- No keyboard shortcuts or a preferences dialog yet — delay and history folder are the only configurable settings, and the history folder can currently only be changed by hand-editing `config.ini`.
+- `gdk_x11_display_get_xdisplay` and `gdk_x11_surface_get_xid` are deprecated in newer GTK4 (the X11-specific GDK API is being phased out), but there is no replacement for direct `_NET_WM_ICON` manipulation. Both are still fully functional.
+- No keyboard shortcuts, and `history_dir` can only be changed by hand-editing `config.ini`.
+- The "show last capture as taskbar icon" feature is X11-only. On Wayland there is no standard mechanism for setting a per-window icon to an arbitrary pixbuf at runtime; the method silently no-ops on non-X11 surfaces.
 - Tray right-click requires a StatusNotifierWatcher host that supports DBusMenu (snixembed + tint2 on Openbox). On XEmbed-only trays without snixembed, the icon won't appear at all.

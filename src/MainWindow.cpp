@@ -3,6 +3,11 @@
 #include "Config.h"
 
 #include <glib/gstdio.h>
+#include <gdk/x11/gdkx.h>
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+
+#include <vector>
 
 namespace {
 
@@ -219,6 +224,13 @@ void MainWindow::buildUi() {
     g_signal_connect(minimizeCheck, "notify::active",
                      G_CALLBACK(onMinimizeBeforeCaptureToggledTrampoline), nullptr);
     gtk_box_append(GTK_BOX(settingsBox), minimizeCheck);
+
+    GtkWidget *taskbarIconCheck = gtk_check_button_new_with_label("Show last capture as taskbar icon");
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(taskbarIconCheck),
+                                 Config::instance().taskbarIconUseCapture());
+    g_signal_connect(taskbarIconCheck, "notify::active",
+                     G_CALLBACK(onTaskbarIconToggledTrampoline), this);
+    gtk_box_append(GTK_BOX(settingsBox), taskbarIconCheck);
     gtk_popover_set_child(GTK_POPOVER(settingsPopover), settingsBox);
     GtkWidget *settingsBtn = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(settingsBtn), "preferences-system-symbolic");
@@ -352,6 +364,7 @@ void MainWindow::onCaptureFinished(bool success, const std::string &path,
     }
 
     crop_overlay_.setImage(pixbuf);
+    updateTaskbarIcon(pixbuf);
     std::string savedPath = history_store_.saveCapture(pixbuf);
     g_object_unref(pixbuf);
 
@@ -554,6 +567,67 @@ void MainWindow::deleteHistoryEntry(const std::string &path) {
     refreshHistory();
 }
 
+void MainWindow::updateTaskbarIcon(GdkPixbuf *pixbuf) {
+    if (!Config::instance().taskbarIconUseCapture())
+        return;
+
+    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window_));
+    if (!surface || !GDK_IS_X11_SURFACE(surface))
+        return;
+
+    static const int kSizes[] = {32, 48};
+    std::vector<unsigned long> data;
+
+    for (int sz : kSizes) {
+        GdkPixbuf *scaled = gdk_pixbuf_scale_simple(pixbuf, sz, sz, GDK_INTERP_BILINEAR);
+        if (!scaled) continue;
+
+        int w          = gdk_pixbuf_get_width(scaled);
+        int h          = gdk_pixbuf_get_height(scaled);
+        int rowstride  = gdk_pixbuf_get_rowstride(scaled);
+        int n_channels = gdk_pixbuf_get_n_channels(scaled);
+        bool has_alpha = gdk_pixbuf_get_has_alpha(scaled);
+        guchar *pixels = gdk_pixbuf_get_pixels(scaled);
+
+        data.push_back(static_cast<unsigned long>(w));
+        data.push_back(static_cast<unsigned long>(h));
+
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                guchar *p = pixels + y * rowstride + x * n_channels;
+                unsigned long a = has_alpha ? p[3] : 255u;
+                unsigned long r = p[0], g = p[1], b = p[2];
+                data.push_back((a << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+        g_object_unref(scaled);
+    }
+
+    Display *dpy  = gdk_x11_display_get_xdisplay(gdk_surface_get_display(surface));
+    Window   xwin = gdk_x11_surface_get_xid(GDK_X11_SURFACE(surface));
+    Atom     atom = XInternAtom(dpy, "_NET_WM_ICON", False);
+
+    XChangeProperty(dpy, xwin, atom, XA_CARDINAL, 32, PropModeReplace,
+                    reinterpret_cast<unsigned char *>(data.data()),
+                    static_cast<int>(data.size()));
+    XFlush(dpy);
+}
+
+void MainWindow::resetTaskbarIcon() {
+    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window_));
+    if (!surface || !GDK_IS_X11_SURFACE(surface))
+        return;
+
+    Display *dpy  = gdk_x11_display_get_xdisplay(gdk_surface_get_display(surface));
+    Window   xwin = gdk_x11_surface_get_xid(GDK_X11_SURFACE(surface));
+    Atom     atom = XInternAtom(dpy, "_NET_WM_ICON", False);
+
+    XDeleteProperty(dpy, xwin, atom);
+    XFlush(dpy);
+
+    gtk_window_set_icon_name(GTK_WINDOW(window_), "accessories-screenshot-tool");
+}
+
 void MainWindow::onCaptureButtonClickedTrampoline(GtkButton *button, gpointer userData) {
     auto *self = static_cast<MainWindow *>(userData);
     int modeInt = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "scrotocol-mode"));
@@ -609,4 +683,12 @@ void MainWindow::onHistoryRowActivatedTrampoline(GtkListBox *, GtkListBoxRow *ro
 void MainWindow::onMinimizeBeforeCaptureToggledTrampoline(GObject *obj, GParamSpec *, gpointer) {
     Config::instance().setMinimizeBeforeCapture(
         gtk_check_button_get_active(GTK_CHECK_BUTTON(obj)));
+}
+
+void MainWindow::onTaskbarIconToggledTrampoline(GObject *obj, GParamSpec *, gpointer userData) {
+    auto *self = static_cast<MainWindow *>(userData);
+    bool active = gtk_check_button_get_active(GTK_CHECK_BUTTON(obj));
+    Config::instance().setTaskbarIconUseCapture(active);
+    if (!active)
+        self->resetTaskbarIcon();
 }
