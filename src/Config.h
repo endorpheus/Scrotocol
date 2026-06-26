@@ -19,6 +19,9 @@ public:
     bool taskbarIconUseCapture() const { return taskbar_icon_use_capture_; }
     void setTaskbarIconUseCapture(bool value);
 
+    int captureScale() const { return capture_scale_; }
+    void setCaptureScale(int scale);
+
 private:
     Config();
     void load();
@@ -27,6 +30,7 @@ private:
 
     std::string history_dir_;
     int default_delay_ = 0;
-    bool minimize_before_capture_ = true;
+    bool minimize_before_capture_  = true;
     bool taskbar_icon_use_capture_ = false;
+    int  capture_scale_            = 1;
 };

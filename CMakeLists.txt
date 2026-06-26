@@ -18,6 +18,7 @@ add_executable(scrotocol
   src/main.cpp
   src/Config.cpp
   src/Capture.cpp
+  src/FilterEngine.cpp
   src/CropOverlay.cpp
   src/HistoryStore.cpp
   src/TrayIcon.cpp

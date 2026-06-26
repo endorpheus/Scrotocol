@@ -1,5 +1,6 @@
 #include "Config.h"
 
+#include <algorithm>
 #include <glib.h>
 #include <glib/gstdio.h>
 
@@ -9,6 +10,7 @@ constexpr const char *kKeyHistoryDir = "history_dir";
 constexpr const char *kKeyDefaultDelay = "default_delay";
 constexpr const char *kKeyMinimizeBeforeCapture = "minimize_before_capture";
 constexpr const char *kKeyTaskbarIconUseCapture = "taskbar_icon_use_capture";
+constexpr const char *kKeyCaptureScale          = "capture_scale";
 } // namespace
 
 Config &Config::instance() {
@@ -67,6 +69,13 @@ void Config::load() {
         taskbar_icon_use_capture_ = taskbarIcon;
     else
         g_clear_error(&taskbarIconError);
+
+    GError *scaleError = nullptr;
+    int scale = g_key_file_get_integer(keyfile, kGroup, kKeyCaptureScale, &scaleError);
+    if (!scaleError)
+        capture_scale_ = std::clamp(scale, 1, 4);
+    else
+        g_clear_error(&scaleError);
 }
 
 void Config::save() const {
@@ -75,6 +84,7 @@ void Config::save() const {
     g_key_file_set_integer(keyfile, kGroup, kKeyDefaultDelay, default_delay_);
     g_key_file_set_boolean(keyfile, kGroup, kKeyMinimizeBeforeCapture, minimize_before_capture_);
     g_key_file_set_boolean(keyfile, kGroup, kKeyTaskbarIconUseCapture, taskbar_icon_use_capture_);
+    g_key_file_set_integer(keyfile, kGroup, kKeyCaptureScale, capture_scale_);
 
     std::string path = configFilePath();
     g_autoptr(GError) error = nullptr;
@@ -99,5 +109,10 @@ void Config::setMinimizeBeforeCapture(bool value) {
 
 void Config::setTaskbarIconUseCapture(bool value) {
     taskbar_icon_use_capture_ = value;
+    save();
+}
+
+void Config::setCaptureScale(int scale) {
+    capture_scale_ = std::clamp(scale, 1, 4);
     save();
 }
