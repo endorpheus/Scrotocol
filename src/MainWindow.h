@@ -62,4 +62,6 @@ private:
     static void onHistoryRowActivatedTrampoline(GtkListBox *box, GtkListBoxRow *row,
                                                  gpointer userData);
     static void onSaveDialogFinished(GObject *source, GAsyncResult *result, gpointer userData);
+    static void onMinimizeBeforeCaptureToggledTrampoline(GObject *obj, GParamSpec *pspec,
+                                                          gpointer userData);
 };

@@ -10,7 +10,7 @@ A native GTK4/C++ desktop front-end for [`scrot`](https://github.com/resurrectin
 - **Clipboard copy** — pushes the current working image onto the system clipboard as a `GdkTexture` (shows up as `image/png`, `image/tiff`, etc. to other apps).
 - **Save As** — native `GtkFileDialog` save dialog, pre-filled with a timestamped filename and the history folder as the starting location.
 - **History panel** — every capture is auto-saved to a configurable folder (default `~/Pictures/Scrotocol`) and listed as thumbnails in a sidebar; click a thumbnail to reload it into the preview, or delete it.
-- **Tray icon** — a minimal `org.kde.StatusNotifierItem` implementation talking D-Bus directly (see [Tray icon details](#tray-icon-details) below). Left-click toggles the main window; right-click quits the app. Closing the window (the titlebar X) quits normally — the tray is purely an opt-in "minimize to tray" affordance via the down-arrow header button.
+- **Tray icon** — a `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` implementation over raw GDBus (see [Tray icon details](#tray-icon-details) below). Left-click toggles the main window. Right-click opens a context menu: Full Screen, Region, Window, Timer (with current delay value), Settings/Show, and Quit. Closing the window (the titlebar X) quits normally — the tray is purely an opt-in "minimize to tray" affordance via the down-arrow header button.
 
 ## Dependencies
 
@@ -93,14 +93,18 @@ All modes add `-o` (overwrite) and `-z` (silent/no beep). The delay countdown is
 
 GTK4 removed `GtkStatusIcon`, and `libappindicator`/`libayatana-appindicator` link GTK3 — running GTK3 and GTK4 in the same process risks symbol clashes, since both export many identically-named C symbols. To avoid that, the tray icon is a from-scratch, dependency-free implementation of the [StatusNotifierItem](https://www.freedesktop.org/wiki/Specifications/StatusNotifierItem/) spec over `GDBus`:
 
-- Registers a well-known bus name `org.kde.StatusNotifierItem-<pid>-1` and an object at `/StatusNotifierItem`.
+- Registers a well-known bus name `org.kde.StatusNotifierItem-<pid>-1` and an SNI object at `/StatusNotifierItem`.
 - Calls `RegisterStatusNotifierItem` on `org.kde.StatusNotifierWatcher`.
-- Implements `Activate`/`SecondaryActivate` (toggle window visibility) and `ContextMenu` (quit). There's no `Menu` property / DBusMenu implementation, so right-click goes straight to `ContextMenu` rather than showing a popup menu.
+- Implements `Activate`/`SecondaryActivate` (toggle window visibility).
+- Registers a `com.canonical.dbusmenu` object at `/MenuBar` (the `Menu` property on the SNI points here). Right-click opens a popup menu built from this layout by the tray host or bridge (snixembed/libdbusmenu-gtk3 on tint2). Menu item clicks arrive as `EventGroup` calls from snixembed (not individual `Event` calls -- a non-obvious protocol detail).
+- At startup, writes a one-line GTK3 CSS rule to `~/.config/gtk-3.0/gtk.css` (idempotent) to ensure menu separators are visible on themes that use the same color for menu background and separator (e.g. Arc-Dark). Takes effect on the next snixembed start.
 
 This requires a StatusNotifierWatcher/host to be running. Most modern desktop panels (KDE Plasma, GNOME Shell with an extension, waybar) provide one natively. On lighter setups (Openbox, etc.) with an XEmbed-only tray like `tint2` or `stalonetray`, run [`snixembed`](https://git.sr.ht/~steef/snixembed) alongside it to bridge StatusNotifierItem icons into the legacy tray — this is exactly the setup verified during development (`tint2` + `snixembed` on Openbox).
+
+Note: **Plank does not work as a tray host.** It's a launcher/window dock with no tray or systray module, so the icon will never appear there no matter what's bridging it — `snixembed` + `tint2` (or another systray-capable panel) is required even if Plank is also running.
 
 ## Known limitations
 
 - `gdk_texture_new_for_pixbuf` is deprecated as of GTK 4.20 with no direct replacement yet; it's still fully functional in GTK 4.22 and is used throughout since the app's image pipeline is built around `GdkPixbuf`. Revisit if/when GTK ships a real replacement.
 - No keyboard shortcuts or a preferences dialog yet — delay and history folder are the only configurable settings, and the history folder can currently only be changed by hand-editing `config.ini`.
-- The tray context menu is a single quit action; there's no multi-item popup menu (would require implementing the DBusMenu protocol).
+- Tray right-click requires a StatusNotifierWatcher host that supports DBusMenu (snixembed + tint2 on Openbox). On XEmbed-only trays without snixembed, the icon won't appear at all.

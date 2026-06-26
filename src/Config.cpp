@@ -7,6 +7,7 @@ namespace {
 constexpr const char *kGroup = "scrotocol";
 constexpr const char *kKeyHistoryDir = "history_dir";
 constexpr const char *kKeyDefaultDelay = "default_delay";
+constexpr const char *kKeyMinimizeBeforeCapture = "minimize_before_capture";
 } // namespace
 
 Config &Config::instance() {
@@ -51,12 +52,20 @@ void Config::load() {
         default_delay_ = delay;
     else
         g_clear_error(&delayError);
+
+    GError *minimizeError = nullptr;
+    gboolean minimize = g_key_file_get_boolean(keyfile, kGroup, kKeyMinimizeBeforeCapture, &minimizeError);
+    if (!minimizeError)
+        minimize_before_capture_ = minimize;
+    else
+        g_clear_error(&minimizeError);
 }
 
 void Config::save() const {
     g_autoptr(GKeyFile) keyfile = g_key_file_new();
     g_key_file_set_string(keyfile, kGroup, kKeyHistoryDir, history_dir_.c_str());
     g_key_file_set_integer(keyfile, kGroup, kKeyDefaultDelay, default_delay_);
+    g_key_file_set_boolean(keyfile, kGroup, kKeyMinimizeBeforeCapture, minimize_before_capture_);
 
     std::string path = configFilePath();
     g_autoptr(GError) error = nullptr;
@@ -71,5 +80,10 @@ void Config::setHistoryDir(const std::string &path) {
 
 void Config::setDefaultDelaySeconds(int seconds) {
     default_delay_ = seconds;
+    save();
+}
+
+void Config::setMinimizeBeforeCapture(bool value) {
+    minimize_before_capture_ = value;
     save();
 }

@@ -58,7 +58,7 @@ std::string HistoryStore::saveCapture(GdkPixbuf *pixbuf) const {
 }
 
 bool HistoryStore::remove(const std::string &path) const {
-    return g_remove(path.c_str()) == 0;
+    return ::remove(path.c_str()) == 0;
 }
 
 GdkPixbuf *HistoryStore::loadThumbnail(const std::string &path, int maxSize) const {

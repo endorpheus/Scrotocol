@@ -13,6 +13,9 @@ public:
     int defaultDelaySeconds() const { return default_delay_; }
     void setDefaultDelaySeconds(int seconds);
 
+    bool minimizeBeforeCapture() const { return minimize_before_capture_; }
+    void setMinimizeBeforeCapture(bool value);
+
 private:
     Config();
     void load();
@@ -21,4 +24,5 @@ private:
 
     std::string history_dir_;
     int default_delay_ = 0;
+    bool minimize_before_capture_ = true;
 };

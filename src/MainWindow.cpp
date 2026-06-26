@@ -53,13 +53,106 @@ struct SaveCtx {
     GdkPixbuf *pixbuf;
 };
 
+struct RowDragCtx {
+    char *path;
+    bool shift_only;
+};
+
+void freeRowDragCtx(gpointer data) {
+    auto *ctx = static_cast<RowDragCtx *>(data);
+    g_free(ctx->path);
+    delete ctx;
+}
+
+void dragCtxNotify(gpointer data, GClosure *) {
+    freeRowDragCtx(data);
+}
+
+GdkContentProvider *onDragPrepare(GtkDragSource *src, double, double, gpointer ud) {
+    auto *ctx = static_cast<RowDragCtx *>(ud);
+    if (ctx->shift_only) {
+        GdkEvent *ev = gtk_gesture_get_last_event(GTK_GESTURE(src), nullptr);
+        if (!ev || !(gdk_event_get_modifier_state(ev) & GDK_SHIFT_MASK))
+            return nullptr;
+    }
+    gchar *uri = g_strdup_printf("file://%s\r\n", ctx->path);
+    GBytes *bytes = g_bytes_new_take(uri, strlen(uri));
+    GdkContentProvider *prov = gdk_content_provider_new_for_bytes("text/uri-list", bytes);
+    g_bytes_unref(bytes);
+    return prov;
+}
+
+void onRowRightClicked(GtkGestureClick *, int, double x, double y, gpointer popover) {
+    GdkRectangle rect = {static_cast<int>(x), static_cast<int>(y), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(popover));
+}
+
+} // namespace
+
+namespace {
+
+// Arc-Dark (and a few other GTK3 themes) give menu separators the same
+// background color as the menu itself, making them invisible. Append a
+// minimal override to the user's gtk-3.0/gtk.css if it isn't already there.
+// This affects every GTK3 app on the system, but only the specific
+// property that was wrong to begin with.
+void ensureGtk3SeparatorFix() {
+    const char *kMarker = "/* scrotocol-separator-fix */";
+    const char *kRule   = "\n/* scrotocol-separator-fix */\n"
+                          "menu separator, .menu separator { background-color: #4f5461; }\n";
+
+    g_autofree gchar *dir  = g_build_filename(g_get_user_config_dir(), "gtk-3.0", nullptr);
+    g_autofree gchar *path = g_build_filename(dir, "gtk.css", nullptr);
+
+    gchar *existing = nullptr;
+    g_file_get_contents(path, &existing, nullptr, nullptr);
+    if (existing && strstr(existing, kMarker)) {
+        g_free(existing);
+        return;
+    }
+    g_free(existing);
+
+    g_mkdir_with_parents(dir, 0755);
+
+    FILE *f = fopen(path, "a");
+    if (f) {
+        fputs(kRule, f);
+        fclose(f);
+    }
+}
+
 } // namespace
 
 MainWindow::MainWindow(GtkApplication *app) : app_(app) {
+    ensureGtk3SeparatorFix();
     buildUi();
     tray_ = std::make_unique<TrayIcon>("accessories-screenshot-tool",
-                                        [this]() { toggleVisibility(); },
-                                        [this]() { g_application_quit(G_APPLICATION(app_)); });
+        [this](TrayAction action) {
+            switch (action) {
+                case TrayAction::FullScreen:
+                    runCountdown(0, [this]() { beginCapture(CaptureMode::FullScreen); });
+                    break;
+                case TrayAction::Region:
+                    runCountdown(0, [this]() { beginCapture(CaptureMode::Region); });
+                    break;
+                case TrayAction::Window:
+                    runCountdown(0, [this]() { beginCapture(CaptureMode::ActiveWindow); });
+                    break;
+                case TrayAction::Timer: {
+                    int delay = Config::instance().defaultDelaySeconds();
+                    runCountdown(delay, [this]() { beginCapture(CaptureMode::FullScreen); });
+                    break;
+                }
+                case TrayAction::Settings:
+                case TrayAction::Show:
+                    present();
+                    break;
+                case TrayAction::Quit:
+                    g_application_quit(G_APPLICATION(app_));
+                    break;
+            }
+        });
     refreshHistory();
 }
 
@@ -113,6 +206,25 @@ void MainWindow::buildUi() {
     gtk_widget_set_tooltip_text(minimizeBtn, "Minimize to tray");
     g_signal_connect(minimizeBtn, "clicked", G_CALLBACK(onMinimizeClickedTrampoline), this);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(headerBar), minimizeBtn);
+
+    GtkWidget *settingsPopover = gtk_popover_new();
+    GtkWidget *settingsBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start(settingsBox, 12);
+    gtk_widget_set_margin_end(settingsBox, 12);
+    gtk_widget_set_margin_top(settingsBox, 8);
+    gtk_widget_set_margin_bottom(settingsBox, 8);
+    GtkWidget *minimizeCheck = gtk_check_button_new_with_label("Minimize before capture");
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(minimizeCheck),
+                                 Config::instance().minimizeBeforeCapture());
+    g_signal_connect(minimizeCheck, "notify::active",
+                     G_CALLBACK(onMinimizeBeforeCaptureToggledTrampoline), nullptr);
+    gtk_box_append(GTK_BOX(settingsBox), minimizeCheck);
+    gtk_popover_set_child(GTK_POPOVER(settingsPopover), settingsBox);
+    GtkWidget *settingsBtn = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(settingsBtn), "preferences-system-symbolic");
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(settingsBtn), settingsPopover);
+    gtk_widget_set_tooltip_text(settingsBtn, "Settings");
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(headerBar), settingsBtn);
 
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_hexpand(paned, TRUE);
@@ -207,7 +319,8 @@ void MainWindow::runCountdown(int seconds, std::function<void()> done) {
 
 void MainWindow::beginCapture(CaptureMode mode) {
     setStatus("Capturing…");
-    gtk_widget_set_visible(window_, FALSE);
+    if (Config::instance().minimizeBeforeCapture())
+        gtk_widget_set_visible(window_, FALSE);
     auto *ctx = new DelayedCaptureCtx{this, mode};
     g_timeout_add(150, delayedCaptureTick, ctx);
 }
@@ -386,6 +499,39 @@ void MainWindow::refreshHistory() {
         g_object_set_data_full(G_OBJECT(rowBox), "scrotocol-path", g_strdup(entry.path.c_str()),
                                 g_free);
 
+        // Right-click context menu
+        GtkWidget *ctxMenu = gtk_popover_new();
+        gtk_widget_set_parent(ctxMenu, rowBox);
+        gtk_popover_set_has_arrow(GTK_POPOVER(ctxMenu), FALSE);
+        GtkWidget *ctxBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        GtkWidget *deleteItem = gtk_button_new_with_label("Delete");
+        gtk_widget_add_css_class(deleteItem, "flat");
+        g_object_set_data_full(G_OBJECT(deleteItem), "scrotocol-path",
+                                g_strdup(entry.path.c_str()), g_free);
+        g_signal_connect(deleteItem, "clicked", G_CALLBACK(onDeleteHistoryClickedTrampoline), this);
+        gtk_box_append(GTK_BOX(ctxBox), deleteItem);
+        gtk_popover_set_child(GTK_POPOVER(ctxMenu), ctxBox);
+        GtkGesture *rightClick = gtk_gesture_click_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(rightClick), 3);
+        g_signal_connect(rightClick, "pressed", G_CALLBACK(onRowRightClicked), ctxMenu);
+        gtk_widget_add_controller(rowBox, GTK_EVENT_CONTROLLER(rightClick));
+
+        // Middle-button drag: always provides the file URI
+        auto *midCtx = new RowDragCtx{g_strdup(entry.path.c_str()), false};
+        GtkDragSource *midDrag = gtk_drag_source_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(midDrag), 2);
+        g_signal_connect_data(midDrag, "prepare", G_CALLBACK(onDragPrepare), midCtx,
+                               dragCtxNotify, (GConnectFlags)0);
+        gtk_widget_add_controller(rowBox, GTK_EVENT_CONTROLLER(midDrag));
+
+        // Shift+primary drag: provides the file URI only when Shift is held
+        auto *shiftCtx = new RowDragCtx{g_strdup(entry.path.c_str()), true};
+        GtkDragSource *shiftDrag = gtk_drag_source_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(shiftDrag), 1);
+        g_signal_connect_data(shiftDrag, "prepare", G_CALLBACK(onDragPrepare), shiftCtx,
+                               dragCtxNotify, (GConnectFlags)0);
+        gtk_widget_add_controller(rowBox, GTK_EVENT_CONTROLLER(shiftDrag));
+
         gtk_list_box_append(GTK_LIST_BOX(history_list_), rowBox);
     }
 }
@@ -458,4 +604,9 @@ void MainWindow::onHistoryRowActivatedTrampoline(GtkListBox *, GtkListBoxRow *ro
         static_cast<const char *>(g_object_get_data(G_OBJECT(child), "scrotocol-path"));
     if (path)
         self->loadFromHistory(path);
+}
+
+void MainWindow::onMinimizeBeforeCaptureToggledTrampoline(GObject *obj, GParamSpec *, gpointer) {
+    Config::instance().setMinimizeBeforeCapture(
+        gtk_check_button_get_active(GTK_CHECK_BUTTON(obj)));
 }
